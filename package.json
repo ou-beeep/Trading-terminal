@@ -8,7 +8,10 @@
     "start": "next start",
     "copy-smartcharts-assets": "node scripts/copy-smartcharts-assets.js",
     "postinstall": "node scripts/copy-smartcharts-assets.js",
-    "prebuild": "node scripts/copy-smartcharts-assets.js"
+    "prebuild": "node scripts/copy-smartcharts-assets.js",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint . --ext .ts,.tsx",
+    "test": "vitest"
   },
   "dependencies": {
     "@deriv-com/translations": "^1.4.7",
