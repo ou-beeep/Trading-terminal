@@ -2,6 +2,11 @@
   "name": "deriv-trading-terminal",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ou-beeep/Trading-terminal.git"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -66,7 +71,7 @@
     "@deriv-com/smartcharts-champion": "^1.9.13"
   },
   "devDependencies": {
-    "@types/node": "^22.20.1",
+    "@types/node": "^24",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "autoprefixer": "^10.0.1",
