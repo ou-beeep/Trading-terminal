@@ -1,0 +1,29 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+
+# Next.js / build
+.next/
+out/
+dist/
+build/
+.vscode/
+.DS_Store
+
+# TypeScript
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+.env.production
+.env.test
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
