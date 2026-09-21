@@ -69,7 +69,7 @@ export function useSmartChartsApi(ws: DerivWS | null): UseSmartChartsApiReturn {
       const key = `${symbol}-${granularity ?? 0}`;
       const request: Record<string, unknown> = {
         ticks_history: symbol,
-        style: style || granularity ? 'candles' : 'ticks',
+        style: style ?? (granularity ? 'candles' : 'ticks'),
         adjust_start_time: 1,
         count: 1,
         end: 'latest',
