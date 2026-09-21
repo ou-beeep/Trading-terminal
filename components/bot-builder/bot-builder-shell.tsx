@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Blockly from 'blockly';
 import 'blockly/blocks';
+import { registerTradingBlocks } from './trading-blocks';
 
 const TOOLBOX = {
   kind: 'categoryToolbox',
@@ -54,6 +55,8 @@ export default function BotBuilderShell() {
 
   useEffect(() => {
     if (!hostRef.current || workspaceRef.current) return;
+
+    registerTradingBlocks();
 
     const workspace = Blockly.inject(hostRef.current, {
       toolbox: TOOLBOX,
