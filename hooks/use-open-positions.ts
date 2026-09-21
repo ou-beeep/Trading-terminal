@@ -40,19 +40,24 @@ export interface OpenPosition {
 // render the exit spot and P&L label markers before removing it.
 const CLOSED_POSITION_TTL_MS = 1500;
 
+interface OpenContractSubscriptionResponse {
+  subscription?: {
+    id?: string;
+  };
+}
+
 export function useOpenPositions(
   ws: DerivWS | null,
   isConnected: boolean,
   isAuthenticated: boolean
 ) {
   const [positions, setPositions] = useState<OpenPosition[]>([]);
-  // Track pending removal timers keyed by contract_id
   const removalTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
-  // Track whether we have an active subscription so we can forget_all on cleanup
-  const isSubscribedRef = useRef(false);
+  // Track subscription ids owned by this hook so cleanup never uses a global
+  // forget_all that could cancel another component's streams.
+  const subscriptionIds = useRef<Set<string>>(new Set());
 
   const scheduleRemoval = useCallback((contractId: number) => {
-    // Cancel any existing timer for this contract first
     const existing = removalTimers.current.get(contractId);
     if (existing) clearTimeout(existing);
 
@@ -69,13 +74,17 @@ export function useOpenPositions(
       return () => { setPositions([]); };
     }
 
-    // Capture ref value at effect time so the cleanup closure has a stable reference
     const timers = removalTimers.current;
+    let disposed = false;
 
-    // Use global message listener — each open contract has its own subscription.id
-    // so we can't use ws.subscribe() for all of them; onMessage catches everything.
     const unsubscribeListener = ws.onMessage((data) => {
-      if (data.msg_type !== 'proposal_open_contract') return;
+      if (disposed || data.msg_type !== 'proposal_open_contract') return;
+
+      const subscriptionId = (data.subscription as { id?: string } | undefined)?.id;
+      if (subscriptionId) {
+        subscriptionIds.current.add(subscriptionId);
+      }
+
       const contract = data.proposal_open_contract as OpenPosition | undefined;
       if (!contract) return;
 
@@ -84,35 +93,48 @@ export function useOpenPositions(
 
       setPositions((prev) => {
         const map = new Map(prev.map((p) => [p.contract_id, p]));
-        // Always upsert the latest data (including exit_spot/exit_spot_time on close)
         map.set(contract.contract_id, contract);
         return Array.from(map.values());
       });
 
       if (isClosed) {
-        // Schedule removal after TTL so exit markers are briefly visible
         scheduleRemoval(contract.contract_id);
       }
     });
 
-    // Kick off subscription — server sends one message per open contract,
-    // each with its own subscription.id for live updates.
     ws.send({ proposal_open_contract: 1, subscribe: 1 })
-      .then(() => { isSubscribedRef.current = true; })
+      .then((response) => {
+        const subscriptionId =
+          (response as OpenContractSubscriptionResponse).subscription?.id;
+
+        if (subscriptionId) {
+          if (disposed) {
+            ws.send({ forget: subscriptionId }).catch(() => {});
+          } else {
+            subscriptionIds.current.add(subscriptionId);
+          }
+        }
+      })
       .catch(() => {});
 
     return () => {
+      disposed = true;
       unsubscribeListener();
-      // Clear all pending removal timers on cleanup
+
       timers.forEach((t) => clearTimeout(t));
       timers.clear();
       setPositions([]);
-      // Cancel all open-contract streams on the server so the next mount
-      // can re-subscribe without hitting AlreadySubscribed.
-      if (isSubscribedRef.current && ws.isConnected) {
-        ws.send({ forget_all: 'proposal_open_contract' }).catch(() => {});
+
+      // Forget only subscriptions created/observed by this hook. This avoids
+      // disrupting unrelated proposal_open_contract consumers on the socket.
+      const ids = Array.from(subscriptionIds.current);
+      subscriptionIds.current.clear();
+
+      if (ws.isConnected) {
+        ids.forEach((id) => {
+          ws.send({ forget: id }).catch(() => {});
+        });
       }
-      isSubscribedRef.current = false;
     };
   }, [ws, isConnected, isAuthenticated, scheduleRemoval]);
 
