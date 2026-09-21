@@ -5,7 +5,8 @@ import * as Blockly from 'blockly';
 import 'blockly/blocks';
 import { registerTradingBlocks } from './trading-blocks';
 import { parseWorkspaceStrategy, validateStrategy, type BotStrategy } from './strategy';
-import { useBotExecutor } from './use-bot-executor';
+import { BotRunPanel } from './bot-run-panel';
+import { useBotRunner } from './use-bot-runner';
 
 const STORAGE_KEY = 'trading-terminal-bot-workspace';
 
@@ -39,8 +40,9 @@ export default function BotBuilderShell() {
   const [message, setMessage] = useState('Build a strategy using Trading blocks.');
   const [saved, setSaved] = useState(false);
   const [strategy, setStrategy] = useState<BotStrategy | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const { execute, proposal, buyResult, buyError, status } = useBotExecutor(strategy);
+  const [validated, setValidated] = useState(false);
+  const [confirmStart, setConfirmStart] = useState(false);
+  const runner = useBotRunner(strategy);
 
   useEffect(() => {
     if (!hostRef.current || workspaceRef.current) return;
@@ -74,42 +76,46 @@ export default function BotBuilderShell() {
     if (!workspace) return;
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) { setMessage('No saved strategy found.'); return; }
-    try { workspace.clear(); Blockly.serialization.workspaces.load(JSON.parse(raw), workspace); setStrategy(null); setMessage('Strategy loaded. Validate it before running.'); }
+    try { workspace.clear(); Blockly.serialization.workspaces.load(JSON.parse(raw), workspace); setStrategy(null); setValidated(false); setMessage('Strategy loaded. Validate it before running.'); }
     catch { setMessage('Saved strategy could not be loaded.'); }
   };
 
   const reset = () => {
+    runner.stop();
     workspaceRef.current?.clear();
     localStorage.removeItem(STORAGE_KEY);
     setStrategy(null);
+    setValidated(false);
     setMessage('Workspace reset.');
   };
 
-  const clear = () => { workspaceRef.current?.clear(); setStrategy(null); setMessage('Workspace cleared.'); };
+  const clear = () => { runner.stop(); workspaceRef.current?.clear(); setStrategy(null); setValidated(false); setMessage('Workspace cleared.'); };
 
   const validate = () => {
     const workspace = workspaceRef.current;
     if (!workspace) return;
     const parsed = parseWorkspaceStrategy(workspace);
     const result = validateStrategy(parsed);
-    if (!result.valid) { setStrategy(null); setMessage(result.errors.join(' ')); return; }
+    if (!result.valid) { setStrategy(null); setValidated(false); setMessage(result.errors.join(' ')); return; }
     const hasPurchase = workspace.getAllBlocks(false).some(b => b.type === 'deriv_purchase');
-    if (!hasPurchase) { setStrategy(null); setMessage('Purchase block is missing.'); return; }
+    if (!hasPurchase) { setStrategy(null); setValidated(false); setMessage('Purchase block is missing.'); return; }
     setStrategy(parsed);
+    setValidated(true);
     setMessage('Strategy validated. Review the stake and contract before running.');
   };
 
-  const run = async () => {
-    if (!strategy) { validate(); return; }
-    setIsRunning(true);
-    try {
-      await execute();
-      setMessage('Purchase request sent successfully.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Purchase failed.');
-    } finally {
-      setIsRunning(false);
+  const requestStart = () => {
+    if (!validated || !strategy) {
+      setMessage('Validate the strategy before starting the bot.');
+      return;
     }
+    setConfirmStart(true);
+  };
+
+  const confirmAndStart = () => {
+    setConfirmStart(false);
+    runner.start();
+    setMessage('Bot started. It will purchase the validated strategy repeatedly until stopped.');
   };
 
   return (
@@ -118,27 +124,50 @@ export default function BotBuilderShell() {
         <div>
           <h1 className="text-lg font-semibold">Bot Builder</h1>
           <p className="text-xs text-muted-foreground">WinIndex-inspired visual Deriv strategy builder</p>
-          <p className="mt-1 text-xs text-muted-foreground">Connection: {status}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Connection: {runner.status}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={load} className="rounded-md border px-3 py-2 text-sm">Load</button>
-          <button type="button" onClick={save} className="rounded-md border px-3 py-2 text-sm">{saved ? 'Saved' : 'Save'}</button>
+          <button type="button" onClick={load} disabled={runner.running} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Load</button>
+          <button type="button" onClick={save} disabled={runner.running} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">{saved ? 'Saved' : 'Save'}</button>
           <button type="button" onClick={reset} className="rounded-md border px-3 py-2 text-sm">Reset</button>
           <button type="button" onClick={clear} className="rounded-md border px-3 py-2 text-sm">Clear</button>
-          <button type="button" onClick={validate} className="rounded-md border px-3 py-2 text-sm">Validate</button>
-          <button type="button" onClick={run} disabled={!strategy || isRunning || !proposal} className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50">
-            {isRunning ? 'Running…' : 'Run Once'}
-          </button>
+          <button type="button" onClick={validate} disabled={runner.running} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Validate</button>
         </div>
       </header>
-      <main className="relative min-h-0 flex-1">
-        <div ref={hostRef} className="h-[calc(100dvh-116px)] w-full overflow-hidden" />
+
+      <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div ref={hostRef} className="h-[calc(100dvh-116px)] min-h-[520px] flex-1 overflow-hidden" />
+        <BotRunPanel
+          strategy={strategy}
+          running={runner.running}
+          status={runner.runnerStatus}
+          stats={runner.stats}
+          onStart={requestStart}
+          onStop={() => { runner.stop(); setMessage('Bot stopped.'); }}
+        />
       </main>
+
       <div className="border-t bg-card px-4 py-2 text-xs">
         <span className="text-muted-foreground">{message}</span>
-        {buyResult && <span className="ml-3">Contract: {String(buyResult.buy?.contract_id ?? 'submitted')}</span>}
-        {buyError && <span className="ml-3 text-destructive">{buyError}</span>}
+        {runner.buyResult && <span className="ml-3">Contract: {String(runner.buyResult.buy?.contract_id ?? 'submitted')}</span>}
+        {runner.buyError && <span className="ml-3 text-destructive">{runner.buyError}</span>}
+        <span className="ml-3 text-amber-600">Use a demo account first. This bot sends real purchase requests on a live account.</span>
       </div>
+
+      {confirmStart && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-xl">
+            <h2 className="text-lg font-semibold">Start Bot?</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              The bot will repeatedly purchase the validated contract strategy until you press Stop. Check the selected Deriv account, stake, symbol and contract type before continuing.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setConfirmStart(false)} className="rounded-md border px-4 py-2 text-sm">Cancel</button>
+              <button type="button" onClick={confirmAndStart} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">Start Bot</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
