@@ -37,13 +37,12 @@ export function useTicks(
     if (!ws || !isConnected || !activeSymbol) return;
     let disposed = false;
 
-    // Unsubscribe from previous
+    // Unsubscribe from the previous stream before creating the next one.
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
       unsubscribeRef.current = null;
     }
 
-    // Reset refs
     pricesRef.current = [];
 
     const ps = pipSizeFromPip(activeSymbol.pip_size);
@@ -76,7 +75,6 @@ export function useTicks(
 
             setCurrentTick(tick);
 
-            // Sliding window update
             pricesRef.current = [...pricesRef.current, tick.quote];
             if (pricesRef.current.length > tickCount) {
               pricesRef.current = pricesRef.current.slice(-tickCount);
@@ -86,6 +84,7 @@ export function useTicks(
           }
         }
       );
+
       if (disposed) {
         sub.unsubscribe();
         return;
@@ -103,11 +102,9 @@ export function useTicks(
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
-      // Send forget_all for ticks so the server clears the stream before the
-      // next mount re-subscribes — prevents AlreadySubscribed on navigation.
-      if (ws?.isConnected) {
-        ws.send({ forget_all: 'ticks' }).catch(() => {});
-      }
+      // Do not use forget_all here. The subscription returned by ws.subscribe()
+      // is scoped to this hook, so its unsubscribe() can clean up without
+      // cancelling tick streams owned by other components.
     };
   }, [ws, isConnected, activeSymbol, tickCount, pipSizeFromPip]);
 
