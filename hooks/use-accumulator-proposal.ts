@@ -87,6 +87,10 @@ export function useAccumulatorProposal(
       unsubRef.current = null;
     }
 
+    // A new proposal stream must never reuse barriers from a previous symbol,
+    // growth rate, stake, currency, or take-profit configuration.
+    prevBarriersRef.current = null;
+
     if (!ws || !isConnected || !params || params.amount <= 0) {
       setProposal(null);
       return;
@@ -117,12 +121,12 @@ export function useAccumulatorProposal(
         const newHigh = details?.high_barrier ?? '';
         const newLow = details?.low_barrier ?? '';
 
-        // Delayed barrier display: show the PREVIOUS tick's barriers on the chart
+        // Delayed barrier display: show the PREVIOUS tick's barriers on the chart.
         // The first time barriers arrive, show them immediately.
         const displayedHigh = prevBarriersRef.current?.high ?? newHigh;
         const displayedLow = prevBarriersRef.current?.low ?? newLow;
 
-        // Store current barriers as the "previous" for next tick
+        // Store current barriers as the "previous" for next tick.
         prevBarriersRef.current = { high: newHigh, low: newLow };
 
         // Detect if the current spot has crossed the displayed barriers.
